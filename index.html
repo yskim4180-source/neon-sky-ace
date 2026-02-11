@@ -20,48 +20,334 @@
         font-family: 'Orbitron', sans-serif;
       }
       canvas {
-        display: block;
-      }
-      @keyframes glitch {
-        0% { transform: translate(0); text-shadow: -2px 0 #ff00c1, 2px 0 #00fff9; }
-        25% { transform: translate(-2px, 2px); }
-        50% { transform: translate(2px, -2px); text-shadow: 2px 0 #ff00c1, -2px 0 #00fff9; }
-        75% { transform: translate(-2px, -2px); }
-        100% { transform: translate(0); }
-      }
-      .glitch-text {
-        animation: glitch 2s infinite linear alternate-reverse;
-      }
-      @keyframes neon-flicker {
-        0%, 19%, 21%, 23%, 25%, 54%, 56%, 100% {
-          opacity: 1;
-          filter: drop-shadow(0 0 5px #00fff9);
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Neon Sky Ace: Overdrive</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Space+Grotesk:wght@300;500&display=swap" rel="stylesheet">
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #050010; font-family: 'Space Grotesk', sans-serif; user-select: none; }
+        .font-futuristic { font-family: 'Orbitron', sans-serif; }
+        canvas { display: block; }
+        @keyframes glitch {
+            0% { transform: translate(0); text-shadow: -2px 0 #ff00c1, 2px 0 #00fff9; }
+            25% { transform: translate(-2px, 2px); }
+            50% { transform: translate(2px, -2px); text-shadow: 2px 0 #ff00c1, -2px 0 #00fff9; }
+            75% { transform: translate(-2px, -2px); }
+            100% { transform: translate(0); }
         }
-        20%, 22%, 24%, 55% {
-          opacity: 0.5;
-          filter: none;
+        .glitch-text { animation: glitch 2s infinite linear alternate-reverse; }
+        @keyframes neon-flicker {
+            0%, 19%, 21%, 23%, 25%, 54%, 56%, 100% { opacity: 1; filter: drop-shadow(0 0 5px #00fff9); }
+            20%, 22%, 24%, 55% { opacity: 0.5; filter: none; }
         }
-      }
-      .neon-flicker {
-        animation: neon-flicker 1.5s infinite;
-      }
+        .neon-flicker { animation: neon-flicker 1.5s infinite; }
     </style>
-  <script type="importmap">
+    <script type="importmap">
 {
   "imports": {
-    "react/": "https://esm.sh/react@^19.2.4/",
-    "react": "https://esm.sh/react@^19.2.4",
+    "react": "https://esm.sh/react@19.2.4",
+    "react-dom/client": "https://esm.sh/react-dom@19.2.4/client",
+    "three": "https://esm.sh/three@0.182.0",
+    "three/examples/jsm/postprocessing/EffectComposer": "https://esm.sh/three@0.182.0/examples/jsm/postprocessing/EffectComposer.js",
+    "three/examples/jsm/postprocessing/RenderPass": "https://esm.sh/three@0.182.0/examples/jsm/postprocessing/RenderPass.js",
+    "three/examples/jsm/postprocessing/UnrealBloomPass": "https://esm.sh/three@0.182.0/examples/jsm/postprocessing/UnrealBloomPass.js",
     "react-dom/": "https://esm.sh/react-dom@^19.2.4/",
-    "three": "https://esm.sh/three@^0.182.0",
-    "three/examples/jsm/": "https://esm.sh/three@0.182.0/examples/jsm/",
+    "react/": "https://esm.sh/react@^19.2.4/",
     "three/": "https://esm.sh/three@^0.182.0/"
   }
 }
 </script>
-<link rel="stylesheet" href="index.css">
 </head>
-  <body>
+<body>
     <div id="root"></div>
-  <script type="module" src="index.tsx"></script>
+    <script type="module">
+        import React, { useState, useEffect, useRef, useCallback } from 'react';
+        import { createRoot } from 'react-dom/client';
+        import * as THREE from 'three';
+        import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer';
+        import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass';
+        import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass';
+
+        // --- Types & Constants ---
+        const GameStatus = { START: 'START', PLAYING: 'PLAYING', GAMEOVER: 'GAMEOVER' };
+        const EnemyType = { BASIC: 0, SEEKER: 1, GOLIATH: 2 };
+
+        // --- Game Component ---
+        const NeonSkyAce = ({ status, onGameOver, onScoreUpdate, onComboUpdate }) => {
+            const containerRef = useRef(null);
+            const scoreRef = useRef(0);
+            const comboRef = useRef(1);
+            const killCountInWindow = useRef(0);
+            const comboWindowTimer = useRef(0);
+            const statusRef = useRef(status);
+            const shakeIntensity = useRef(0);
+
+            useEffect(() => {
+                statusRef.current = status;
+                if (status === GameStatus.PLAYING) {
+                    scoreRef.current = 0;
+                    comboRef.current = 1;
+                    onScoreUpdate(0);
+                    onComboUpdate(1);
+                }
+            }, [status, onScoreUpdate, onComboUpdate]);
+
+            useEffect(() => {
+                if (!containerRef.current) return;
+
+                const scene = new THREE.Scene();
+                scene.background = new THREE.Color(0x0a001a);
+                scene.fog = new THREE.FogExp2(0x1a0033, 0.0025);
+
+                const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 5000);
+                const cameraBasePos = new THREE.Vector3(0, 10, 25);
+                camera.position.copy(cameraBasePos);
+
+                const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+                renderer.setSize(window.innerWidth, window.innerHeight);
+                renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+                containerRef.current.appendChild(renderer.domElement);
+
+                const composer = new EffectComposer(renderer);
+                composer.addPass(new RenderPass(scene, camera));
+                const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 2.0, 0.4, 0.3);
+                composer.addPass(bloomPass);
+
+                scene.add(new THREE.AmbientLight(0x4020a0, 1.2));
+                const sunLight = new THREE.DirectionalLight(0xffaa00, 1.5);
+                sunLight.position.set(0, 50, -500);
+                scene.add(sunLight);
+                const flashLight = new THREE.PointLight(0xff00ff, 0, 120);
+                scene.add(flashLight);
+
+                // Floor Grid
+                const grid = new THREE.Mesh(
+                    new THREE.PlaneGeometry(3500, 3500, 100, 100),
+                    new THREE.MeshBasicMaterial({ color: 0x00ffff, wireframe: true, transparent: true, opacity: 0.2 })
+                );
+                grid.rotation.x = -Math.PI / 2;
+                scene.add(grid);
+
+                // Synthwave Sun
+                const sunGroup = new THREE.Group();
+                for (let i = 0; i < 10; i++) {
+                    const segH = 8 - (i * 0.4);
+                    const seg = new THREE.Mesh(
+                        new THREE.BoxGeometry(200, segH, 1),
+                        new THREE.MeshBasicMaterial({ color: i < 5 ? 0xff3300 : 0xffcc00, transparent: true, opacity: 1 - (i * 0.05) })
+                    );
+                    seg.position.y = i * (segH + 4) - 50;
+                    seg.scale.x = Math.sqrt(1 - Math.pow((seg.position.y / 80), 2)) || 0.1;
+                    sunGroup.add(seg);
+                }
+                sunGroup.position.set(0, 200, -1200);
+                sunGroup.scale.set(10, 10, 1);
+                scene.add(sunGroup);
+
+                // --- PLAYER JET REBUILD (Image Style) ---
+                const jetGroup = new THREE.Group();
+                const jetMat = new THREE.MeshStandardMaterial({ 
+                    color: 0x00d4ff, emissive: 0x004455, emissiveIntensity: 0.8,
+                    metalness: 0.9, roughness: 0.1, flatShading: true 
+                });
+                
+                // Fuselage
+                const fuse = new THREE.Mesh(new THREE.ConeGeometry(1.5, 6, 4), jetMat);
+                fuse.rotation.x = Math.PI / 2;
+                fuse.scale.set(1.4, 1, 0.7);
+                jetGroup.add(fuse);
+
+                // Cockpit
+                const cock = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.6, 2), new THREE.MeshStandardMaterial({ color: 0x050505, metalness: 1 }));
+                cock.position.set(0, 0.5, -0.8);
+                jetGroup.add(cock);
+
+                // Sweep Wings
+                const wingS = new THREE.Shape();
+                wingS.moveTo(0, 0); wingS.lineTo(11, -6); wingS.lineTo(11, -10); wingS.lineTo(0, -4); wingS.lineTo(0, 0);
+                const wingG = new THREE.ExtrudeGeometry(wingS, { depth: 0.1, bevelEnabled: false });
+                const lWing = new THREE.Mesh(wingG, jetMat); lWing.rotation.x = Math.PI / 2; lWing.position.set(0, 0, 1.2);
+                jetGroup.add(lWing);
+                const rWing = lWing.clone(); rWing.scale.x = -1; jetGroup.add(rWing);
+
+                // Thrusters
+                const engG = new THREE.CylinderGeometry(0.7, 0.9, 1.5, 16);
+                const lEng = new THREE.Mesh(engG, jetMat); lEng.rotation.x = Math.PI / 2; lEng.position.set(1.1, -0.1, 3);
+                jetGroup.add(lEng);
+                const rEng = lEng.clone(); rEng.position.x = -1.1; jetGroup.add(rEng);
+
+                const thrusterMat = new THREE.MeshBasicMaterial({ color: 0xffee88 });
+                const lThruster = new THREE.Mesh(new THREE.SphereGeometry(0.6, 16, 16), thrusterMat);
+                lThruster.position.set(1.1, -0.1, 4); jetGroup.add(lThruster);
+                const rThruster = lThruster.clone(); rThruster.position.x = -1.1; jetGroup.add(rThruster);
+
+                jetGroup.scale.set(0.6, 0.6, 0.6);
+                jetGroup.position.y = 10;
+                scene.add(jetGroup);
+
+                // --- Entities & Logic ---
+                const laserPool = [], enemyPool = [], activeLasers = [], activeEnemies = [], particles = [];
+                const mouse = { x: 0, y: 0 };
+                window.addEventListener('mousemove', (e) => {
+                    mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+                    mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+                });
+
+                const spawnLaser = (off) => {
+                    let l = laserPool.pop() || new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 10, 8), new THREE.MeshBasicMaterial({ color: 0xff3333 }));
+                    l.rotation.x = Math.PI / 2; l.position.copy(jetGroup.position); l.position.x += off;
+                    scene.add(l); activeLasers.push(l);
+                };
+
+                const spawnEnemy = () => {
+                    const r = Math.random();
+                    const type = r > 0.9 ? EnemyType.GOLIATH : (r > 0.7 ? EnemyType.SEEKER : EnemyType.BASIC);
+                    let e = enemyPool.pop() || new THREE.Mesh(new THREE.IcosahedronGeometry(2.5, 0), new THREE.MeshPhongMaterial({ flatShading: true }));
+                    e.enemyType = type; e.hp = type === EnemyType.GOLIATH ? 3 : 1;
+                    e.scale.setScalar(type === EnemyType.GOLIATH ? 4 : (type === EnemyType.SEEKER ? 1.8 : 1.3));
+                    const col = type === EnemyType.GOLIATH ? 0xff00ff : (type === EnemyType.SEEKER ? 0x00ffff : 0xffcc00);
+                    e.material.color.set(col); e.material.emissive.set(col);
+                    e.position.set(THREE.MathUtils.randFloatSpread(150), THREE.MathUtils.randFloat(5, 60), -1600);
+                    scene.add(e); activeEnemies.push(e);
+                };
+
+                const explode = (pos, col) => {
+                    shakeIntensity.current = 1.0; flashLight.position.copy(pos); flashLight.color.set(col); flashLight.intensity = 200;
+                    const geo = new THREE.BufferGeometry(); const c = 40; const pA = new Float32Array(c * 3); const vA = new Float32Array(c * 3);
+                    for(let i=0; i<c; i++){ pA[i*3]=pos.x; pA[i*3+1]=pos.y; pA[i*3+2]=pos.z; vA[i*3]=(Math.random()-0.5)*3; vA[i*3+1]=(Math.random()-0.5)*3; vA[i*3+2]=(Math.random()-0.5)*3; }
+                    geo.setAttribute('position', new THREE.BufferAttribute(pA, 3));
+                    const p = new THREE.Points(geo, new THREE.PointsMaterial({ color: col, size: 0.8, transparent: true }));
+                    p.velocities = vA; p.life = 1.0; scene.add(p); particles.push(p);
+                };
+
+                let lastSpawn = 0, lastFire = 0; const clock = new THREE.Clock();
+                const animate = () => {
+                    const frameId = requestAnimationFrame(animate);
+                    const dt = clock.getDelta(); const time = performance.now();
+                    const fl = Math.random() * 0.4 + 0.8; lThruster.scale.setScalar(fl); rThruster.scale.setScalar(fl);
+
+                    if (statusRef.current === GameStatus.PLAYING) {
+                        // Advanced Banking Logic
+                        const tX = mouse.x * 50, tY = (mouse.y * 25) + 12;
+                        jetGroup.position.x += (tX - jetGroup.position.x) * 0.1;
+                        jetGroup.position.y += (tY - jetGroup.position.y) * 0.1;
+                        jetGroup.rotation.z = THREE.MathUtils.lerp(jetGroup.rotation.z, -mouse.x * (Math.PI / 4), 0.08);
+                        jetGroup.rotation.x = THREE.MathUtils.lerp(jetGroup.rotation.x, -mouse.y * (Math.PI / 8), 0.08);
+
+                        if (time - lastFire > 130) { spawnLaser(-2.5); spawnLaser(2.5); lastFire = time; }
+                        if (time - lastSpawn > 350) { spawnEnemy(); lastSpawn = time; }
+                        if (time > comboWindowTimer.current && comboRef.current > 1) { comboRef.current = 1; onComboUpdate(1); }
+
+                        activeLasers.forEach((l, i) => { l.position.z -= 1100 * dt; if(l.position.z < -2000){ scene.remove(l); laserPool.push(activeLasers.splice(i,1)[0]); }});
+                        activeEnemies.forEach((e, i) => {
+                            e.position.z += 400 * dt; e.rotation.y += 2 * dt;
+                            if(e.enemyType === EnemyType.SEEKER) e.position.x += (jetGroup.position.x - e.position.x) * 0.04;
+                            activeLasers.forEach((l, j) => {
+                                if(l.position.distanceTo(e.position) < (e.enemyType === EnemyType.GOLIATH ? 12 : 7)){
+                                    e.hp--; scene.remove(l); laserPool.push(activeLasers.splice(j,1)[0]);
+                                    if(e.hp <= 0){
+                                        explode(e.position, e.material.color.getHex()); scene.remove(e); enemyPool.push(activeEnemies.splice(i,1)[0]);
+                                        killCountInWindow.current++; comboWindowTimer.current = time + 2000;
+                                        if(killCountInWindow.current >= 5){ comboRef.current = 2; onComboUpdate(2); }
+                                        scoreRef.current += (e.enemyType === EnemyType.GOLIATH ? 1000 : 100) * comboRef.current; onScoreUpdate(scoreRef.current);
+                                    }
+                                }
+                            });
+                            if(e && jetGroup.position.distanceTo(e.position) < (e.enemyType === EnemyType.GOLIATH ? 10 : 6)) onGameOver(scoreRef.current);
+                            if(e && e.position.z > 100){ scene.remove(e); enemyPool.push(activeEnemies.splice(i,1)[0]); }
+                        });
+
+                        grid.position.z = (grid.position.z + 280 * dt) % 40;
+                        flashLight.intensity *= 0.9;
+                        particles.forEach((p, i) => {
+                            const arr = p.geometry.attributes.position.array; for(let j=0; j<arr.length; j++) arr[j]+=p.velocities[j];
+                            p.geometry.attributes.position.needsUpdate = true; p.life -= 2.5*dt; p.material.opacity = p.life;
+                            if(p.life <= 0){ scene.remove(p); particles.splice(i,1); }
+                        });
+                        if(shakeIntensity.current > 0){ camera.position.x += (Math.random()-0.5)*shakeIntensity.current; camera.position.y += (Math.random()-0.5)*shakeIntensity.current; shakeIntensity.current *= 0.85; }
+                        else camera.position.lerp(cameraBasePos, 0.1);
+                    } else {
+                        jetGroup.position.y = 12 + Math.sin(time*0.001)*4; jetGroup.rotation.y += 0.6*dt; grid.position.z = (grid.position.z + 30*dt)%40;
+                    }
+                    composer.render();
+                };
+                animate();
+
+                const handleResize = () => { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); composer.setSize(window.innerWidth, window.innerHeight); };
+                window.addEventListener('resize', handleResize);
+                return () => { window.removeEventListener('resize', handleResize); if (containerRef.current) containerRef.current.removeChild(renderer.domElement); };
+            }, [onGameOver, onScoreUpdate, onComboUpdate]);
+
+            return <div ref={containerRef} className="w-full h-full" />;
+        };
+
+        // --- App Layout ---
+        const App = () => {
+            const [score, setScore] = useState(0);
+            const [combo, setCombo] = useState(1);
+            const [status, setStatus] = useState(GameStatus.START);
+
+            const handleGameOver = useCallback((s) => { setScore(s); setStatus(GameStatus.GAMEOVER); }, []);
+            const startGame = () => { setScore(0); setCombo(1); setStatus(GameStatus.PLAYING); };
+
+            return (
+                <div className="relative w-full h-screen bg-[#050010] overflow-hidden">
+                    <NeonSkyAce status={status} onGameOver={handleGameOver} onScoreUpdate={setScore} onComboUpdate={setCombo} />
+                    
+                    <div className="absolute inset-0 pointer-events-none flex flex-col justify-between p-8">
+                        <div className="flex justify-between items-start">
+                            <div className="space-y-2">
+                                <div className="bg-black/40 backdrop-blur-md border border-cyan-500/30 p-4 rounded-lg">
+                                    <h2 className="text-cyan-400 font-futuristic text-[10px] tracking-widest uppercase mb-1">Score</h2>
+                                    <p className="text-white font-futuristic text-3xl">{score.toLocaleString()}</p>
+                                </div>
+                                {combo > 1 && (
+                                    <div className="bg-fuchsia-600/20 backdrop-blur-md border border-fuchsia-500/50 p-2 rounded-lg neon-flicker">
+                                        <p className="text-fuchsia-400 font-futuristic text-xl italic tracking-tighter">COMBO X{combo}</p>
+                                    </div>
+                                )}
+                            </div>
+                            <h1 className="text-magenta-500 font-futuristic text-2xl italic tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-white to-fuchsia-500 glitch-text">
+                                NEON SKY ACE: OVERDRIVE
+                            </h1>
+                        </div>
+
+                        {status !== GameStatus.PLAYING && (
+                            <div className="absolute inset-0 flex items-center justify-center pointer-events-auto bg-black/60 backdrop-blur-sm">
+                                <div className="text-center p-12 bg-black/80 border-2 border-fuchsia-500 shadow-[0_0_80px_rgba(255,0,255,0.4)] rounded-2xl max-w-md w-full">
+                                    <h2 className="text-5xl font-futuristic text-white mb-6">{status === GameStatus.START ? 'SYSTEM READY' : 'PILOT DOWN'}</h2>
+                                    {status === GameStatus.GAMEOVER && (
+                                        <div className="mb-8">
+                                            <p className="text-fuchsia-400 font-futuristic text-sm tracking-widest mb-1">TOTAL POINTS</p>
+                                            <p className="text-white font-futuristic text-5xl mb-4">{score.toLocaleString()}</p>
+                                        </div>
+                                    )}
+                                    <button onClick={startGame} className="w-full bg-gradient-to-r from-cyan-400 via-blue-500 to-fuchsia-600 text-white font-futuristic py-4 px-8 rounded-full text-xl hover:scale-105 transition-transform active:scale-95 shadow-[0_0_30px_rgba(6,182,212,0.6)]">
+                                        {status === GameStatus.START ? 'IGNITE ENGINES' : 'RE-INITIALIZE'}
+                                    </button>
+                                    <div className="mt-8 grid grid-cols-2 gap-4 text-[10px] text-cyan-300/40 font-futuristic uppercase tracking-[0.2em]">
+                                        <div>• Mouse to Steer</div><div>• Auto-fire Enabled</div><div>• Avoid Collisions</div><div>• Chain Kills for Combo</div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        <div className="w-full flex justify-center pb-2">
+                            <p className="text-white/40 font-futuristic text-[9px] tracking-[0.5em] uppercase glitch-text">© Happy Virus</p>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const root = createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
 </body>
 </html>
